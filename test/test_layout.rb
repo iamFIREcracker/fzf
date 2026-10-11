@@ -2093,4 +2093,20 @@ class TestLayout < TestInteractive
     wait_for_reversed_to_edge(exempt_rows: 1)
     tmux.send_keys 'Escape'
   end
+
+  # Gap rows are rendered through a separate code path. The gap line follows
+  # the reversed base color, and the cells it leaves, including the remainder
+  # of a wide gap line, are painted with it.
+  def test_reverse_base_color_extends_to_window_edge_with_gap_line
+    [['=', "--gap-line '='"], [nil, "--gap-line ''"], ['＝', "--gap-line '＝'"]].each do |char, opt|
+      tmux.send_keys %(seq 3 | #{FZF} --gap #{opt} --color fg:reverse), :Enter
+      tmux.until do |lines|
+        assert_equal 3, lines.match_count
+        assert_equal(char ? 3 : 0, lines.count { |line| char && line.include?(char * 10) })
+      end
+      wait_for_reversed_to_edge
+      tmux.send_keys 'Escape'
+      tmux.prepare
+    end
+  end
 end

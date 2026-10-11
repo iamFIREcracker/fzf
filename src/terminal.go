@@ -3954,14 +3954,19 @@ func (t *Terminal) gutter(current bool, alt bool) {
 func (t *Terminal) renderGapLine(line int, barRange [2]int, drawLine bool) {
 	t.move(line, 0, false)
 	t.gutter(false, false)
-	t.window.Print(t.markerEmpty)
+	t.printBlank(t.markerEmpty)
 	x := t.pointerLen + t.markerLen
 
 	width := t.window.Width() - x - 1
 	if drawLine && t.gapLine != nil {
+		if t.reverseBase() {
+			// The gap line does not cover the last column, nor the remainder
+			// left by a wide character that does not fit
+			t.clearToEnd(line, x)
+		}
 		t.gapLine(t.window, width)
 	} else {
-		t.move(line, x, true)
+		t.clearToEnd(line, x)
 	}
 	t.markOtherLine(line)
 	t.renderBar(line, barRange)

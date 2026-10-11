@@ -197,6 +197,9 @@ class Tmux
     go(%W[display-message -p -t #{win} \#{pane_width}]).first.to_i
   end
 
+  # East Asian wide and fullwidth characters, which take two cells.
+  WIDE_CHAR = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/
+
   # 3-bit ANSI bg code (40..47) -> color name used in --color options.
   BG_NAMES = %w[black red green yellow blue magenta cyan white].freeze
 
@@ -260,7 +263,8 @@ class Tmux
           end
           i = j + 1
         else
-          cells << state
+          # A wide character takes two cells
+          cells.concat([state] * (row[i].match?(WIDE_CHAR) ? 2 : 1))
           i += 1
         end
       end
