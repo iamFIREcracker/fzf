@@ -2037,4 +2037,60 @@ class TestLayout < TestInteractive
     assert_operator count_full_rows(ranges, 'red'), :>=, 3
     tmux.send_keys 'Escape'
   end
+
+  private
+
+  # Count rows whose trailing range is reversed, reaches the last column of
+  # the pane, and starts no later than `max_start` (i.e. the reverse run
+  # covers the whole line except possibly the gutter columns).
+  def count_reversed_to_edge(rows, max_start, width)
+    rows.count do |r|
+      !r.empty? && r.last[2] && r.last[1] == width - 1 && r.last[0] <= max_start
+    end
+  end
+
+  # Wait until every row but the info and prompt lines at the bottom (item
+  # rows, gap rows, and the empty lines above them) is reversed up to the last
+  # column of the pane; only the gutter columns may be exempt. `exempt_rows`
+  # rows besides the info and prompt lines may be exempt, and the reverse run
+  # may start as late as `max_start`.
+  def wait_for_reversed_to_edge(exempt_rows: 0, max_start: 2)
+    width = tmux.pane_width
+    tmux.until do |_|
+      rows = tmux.reverse_ranges
+      assert_equal_org rows.length - 2 - exempt_rows, count_reversed_to_edge(rows, max_start, width)
+    end
+  end
+
+  public
+
+  # Regression for #4823: erasing only carries the background color, never
+  # attributes such as reverse. So when the base list color has the reverse
+  # attribute, the blank cells of the list have to be explicitly painted with
+  # it, otherwise the reverse styling stops at the last visible character.
+  # The current colors only apply to the item itself without --highlight-line.
+  def test_reverse_base_color_extends_to_window_edge
+    tmux.send_keys %(seq 5 | #{FZF} --color fg:reverse,current-fg:regular), :Enter
+    tmux.until { |lines| assert_equal 5, lines.match_count }
+    wait_for_reversed_to_edge(max_start: 3)
+    tmux.send_keys 'Escape'
+  end
+
+  # Scrolling redraws the items in place, while the scrollbar is only redrawn
+  # when it moves. So padding the items must not paint over the scrollbar.
+  def test_reverse_base_color_keeps_scrollbar_when_scrolling
+    tmux.send_keys %(seq 1000 | #{FZF} --scrollbar '|' --color fg:reverse --bind ctrl-y:offset-up), :Enter
+    tmux.until { |lines| assert_equal 1000, lines.match_count }
+    # Move the cursor away from the bottom row so that the list can scroll
+    tmux.send_keys :Up, :Up, :Up
+    tmux.until { |lines| assert_includes lines, '> 4' }
+    tmux.send_keys 'C-y'
+    tmux.until do |lines|
+      assert_match(/\b2\s+\|\z/, lines[-3])
+      assert_equal(1, lines.count { |line| line.end_with?('|') })
+    end
+    # Every row but the one with the scrollbar is reversed up to the edge
+    wait_for_reversed_to_edge(exempt_rows: 1)
+    tmux.send_keys 'Escape'
+  end
 end
