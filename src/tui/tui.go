@@ -1339,6 +1339,7 @@ func InitTheme(theme *ColorTheme, baseTheme *ColorTheme, boldify bool, forceBlac
 	undefined := NewColorAttr()
 	scrollbarDefined := theme.Scrollbar != undefined
 	previewBorderDefined := theme.PreviewBorder != undefined
+	gapLineDefined := theme.GapLine != undefined
 
 	theme.NthSelectedAttr = theme.SelectedFg.Attr
 	theme.SelectedFg = theme.ListFg.Merge(theme.SelectedFg)
@@ -1371,6 +1372,11 @@ func InitTheme(theme *ColorTheme, baseTheme *ColorTheme, boldify bool, forceBlac
 	theme.Separator = o(theme.ListBorder, theme.Separator)
 	theme.Scrollbar = o(theme.ListBorder, theme.Scrollbar)
 	theme.GapLine = o(theme.ListBorder, theme.GapLine)
+	// The gap line spans the list, so it follows the reversed list color
+	// unless its color is specified (#4823)
+	if !gapLineDefined && theme.ListFg.Attr&Reverse > 0 {
+		theme.GapLine.Attr |= Reverse
+	}
 	/*
 		--color list-border:green
 		--color scrollbar:red
