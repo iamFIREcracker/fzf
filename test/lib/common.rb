@@ -192,6 +192,11 @@ class Tmux
     go(%W[capture-pane -p -J -e -t #{win}])
   end
 
+  # Width of the pane in columns.
+  def pane_width
+    go(%W[display-message -p -t #{win} \#{pane_width}]).first.to_i
+  end
+
   # 3-bit ANSI bg code (40..47) -> color name used in --color options.
   BG_NAMES = %w[black red green yellow blue magenta cyan white].freeze
 
@@ -201,41 +206,61 @@ class Tmux
   #   'red' / 'green' / 'blue' / ... (3-bit names)
   #   'bright-red' / ...             (bright variants)
   #   '256:<n>'                      (256-color fallback)
-  # ANSI state persists across rows, matching real terminal behavior.
   def bg_ranges
-    raw = go(%W[capture-pane -p -J -e -t #{win}])
-    bg = 'default'
-    raw.map do |row|
+    sgr_ranges('default') do |bg, param|
+      case param
+      in 0 | 49 then 'default'
+      in 40..47 then BG_NAMES[param - 40]
+      in 100..107 then "bright-#{BG_NAMES[param - 100]}"
+      in [48, 5, n] then "256:#{n}"
+      in [48, 2, r, g, b] then "rgb:#{r}:#{g}:#{b}"
+      else bg
+      end
+    end
+  end
+
+  # Parse `tmux capture-pane -e` output into per-row ranges of the reverse
+  # attribute. Each row is an array of [col_start, col_end, reversed] tuples.
+  def reverse_ranges
+    sgr_ranges(false) do |reversed, param|
+      case param
+      in 0 | 27 then false
+      in 7 then true
+      else reversed
+      end
+    end
+  end
+
+  # Parse `tmux capture-pane -e` output into per-row ranges of a state derived
+  # from SGR parameters. Each row is an array of [col_start, col_end, state]
+  # tuples. The block receives the current state and an SGR parameter, which
+  # is an array for extended colors (e.g. [48, 5, n]), and returns the new
+  # state. ANSI state persists across rows, matching real terminal behavior.
+  def sgr_ranges(state)
+    capture_ansi.map do |row|
       cells = []
       i = 0
       len = row.length
       while i < len
-        c = row[i]
-        if c == "\e" && row[i + 1] == '['
+        if row[i] == "\e" && row[i + 1] == '['
           j = i + 2
           j += 1 while j < len && row[j] != 'm'
-          parts = row[i + 2...j].split(';')
+          parts = row[i + 2...j].split(';').map(&:to_i)
           k = 0
           while k < parts.length
-            p = parts[k].to_i
-            case p
-            when 0, 49 then bg = 'default'
-            when 40..47 then bg = BG_NAMES[p - 40]
-            when 100..107 then bg = "bright-#{BG_NAMES[p - 100]}"
-            when 48
-              if parts[k + 1] == '5'
-                bg = "256:#{parts[k + 2]}"
-                k += 2
-              elsif parts[k + 1] == '2'
-                bg = "rgb:#{parts[k + 2]}:#{parts[k + 3]}:#{parts[k + 4]}"
-                k += 4
-              end
-            end
-            k += 1
+            # Extended colors: 38;5;n / 48;5;n and 38;2;r;g;b / 48;2;r;g;b
+            size = case parts[k, 2]
+                   in [38 | 48, 5] then 3
+                   in [38 | 48, 2] then 5
+                   else 1
+                   end
+            param = size > 1 ? parts[k, size] : parts[k]
+            state = yield(state, param)
+            k += size
           end
           i = j + 1
         else
-          cells << bg
+          cells << state
           i += 1
         end
       end

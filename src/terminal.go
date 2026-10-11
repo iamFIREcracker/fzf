@@ -3892,8 +3892,37 @@ func (t *Terminal) renderBar(line int, barRange [2]int) {
 	}
 }
 
+// reverseBase tells whether the base color of the list has the reverse
+// attribute. Plain printing and clearing only apply the background color, so
+// blank cells of the list then have to be explicitly painted with the base
+// color for the attribute to reach the edge of the window (#4823).
+func (t *Terminal) reverseBase() bool {
+	return tui.ColNormal.Attr()&tui.Reverse > 0
+}
+
+// printBlank prints a blank string in the list, carrying the attributes of the
+// base color when required.
+func (t *Terminal) printBlank(str string) {
+	if t.reverseBase() {
+		t.window.CPrint(tui.ColNormal, str)
+	} else {
+		t.window.Print(str)
+	}
+}
+
+// clearToEnd clears the line from column x to the right edge of the window,
+// carrying the attributes of the base color when required, and leaves the
+// cursor at column x.
+func (t *Terminal) clearToEnd(line int, x int) {
+	t.move(line, x, true)
+	if t.reverseBase() && x < t.window.Width() {
+		t.window.CPrint(tui.ColNormal, strings.Repeat(" ", t.window.Width()-x))
+		t.move(line, x, false)
+	}
+}
+
 func (t *Terminal) renderEmptyLine(line int, barRange [2]int) {
-	t.move(line, 0, true)
+	t.clearToEnd(line, 0)
 	t.markEmptyLine(line)
 	t.renderBar(line, barRange)
 }
@@ -3965,9 +3994,11 @@ func (t *Terminal) printList() {
 func (t *Terminal) printBar(lineNum int, forceRedraw bool, barRange [2]int) bool {
 	hasBar := lineNum >= barRange[0] && lineNum < barRange[1]
 	if (hasBar != t.prevLines[lineNum].hasBar || forceRedraw) && t.window.Width() > 0 {
-		if len(t.scrollbar) > 0 {
-			t.move(lineNum, t.window.Width()-1, true)
-			if hasBar {
+		// Without a scrollbar, the column reserved for it still has to be
+		// painted when the base color is reversed
+		if len(t.scrollbar) > 0 || t.barCol() > 0 && t.reverseBase() {
+			t.clearToEnd(lineNum, t.window.Width()-1)
+			if hasBar && len(t.scrollbar) > 0 {
 				t.window.CPrint(tui.ColScrollbar, t.scrollbar)
 			}
 		}
@@ -4065,7 +4096,7 @@ func (t *Terminal) printItem(result Result, line int, maxLine int, index int, cu
 				fillSpaces -= t.wrapSignWidth
 			}
 			if fillSpaces > 0 {
-				t.window.Print(strings.Repeat(" ", fillSpaces))
+				t.printBlank(strings.Repeat(" ", fillSpaces))
 			}
 			newLine.width = width
 			if wrapped {
@@ -4137,7 +4168,7 @@ func (t *Terminal) printItem(result Result, line int, maxLine int, index int, cu
 			if selected {
 				t.window.CPrint(tui.ColMarker, markerFor(marker))
 			} else {
-				t.window.Print(t.markerEmpty)
+				t.printBlank(t.markerEmpty)
 			}
 			return indentSize
 		}
